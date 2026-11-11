@@ -1753,12 +1753,6 @@ class PsbtTestsCommon {
     @Test
     fun `malformed psbts are rejected without throwing`() {
         // Psbt.read reports malformed input through Either: callers parsing untrusted PSBTs must never see an exception.
-        val magic = "70736274ff"
-        // Key lengths that BtcSerializer.varint refuses: non-canonical, truncated and above MAX_SIZE.
-        listOf("fd0100", "fd01", "fe00000004").forEach { keyLength ->
-            assertEquals(Either.Left(ParseFailure.InvalidContent), Psbt.read(ByteVector(magic + keyLength)))
-        }
-
         val pub = PrivateKey(ByteVector32.One).publicKey()
         val tx = Transaction(
             version = 2,
@@ -1770,6 +1764,16 @@ class PsbtTestsCommon {
         val emptyPsbt = Psbt.write(Psbt(tx)).toHex()
         assertTrue(emptyPsbt.endsWith("000000"))
         val globalEntries = emptyPsbt.dropLast(6)
+
+        // Lengths that BtcSerializer.varint refuses: non-canonical, truncated and above MAX_SIZE.
+        // Each is tried as the key length and as the value length (after a valid 1-byte key) in the global, input and output maps.
+        val mapPrefixes = listOf(globalEntries, globalEntries + "00", globalEntries + "00" + "00")
+        listOf("fd0100", "fd01", "fe00000004").forEach { length ->
+            mapPrefixes.forEach { prefix ->
+                assertEquals(Either.Left(ParseFailure.InvalidContent), Psbt.read(ByteVector(prefix + length)))
+                assertEquals(Either.Left(ParseFailure.InvalidContent), Psbt.read(ByteVector(prefix + "01" + "fc" + length)))
+            }
+        }
 
         // PSBT_GLOBAL_XPUB whose public key is not a valid point.
         val xpub = "0488b21e" + "00" + "00000000" + "00000000" + ByteVector32.Zeroes.toHex() + "04" + ByteVector32.Zeroes.toHex()
